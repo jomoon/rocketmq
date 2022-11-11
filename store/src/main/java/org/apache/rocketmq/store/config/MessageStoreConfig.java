@@ -713,6 +713,10 @@ public class MessageStoreConfig {
         this.dLegerSelfId = dLegerSelfId;
     }
 
+    /**
+     * 是否启用 DLedger，即是否启用 RocketMQ 主从切换，默认值为 false。如果需要开启主从切换，则该值需要设置为 true 。
+     * @return
+     */
     public boolean isEnableDLegerCommitLog() {
         return enableDLegerCommitLog;
     }

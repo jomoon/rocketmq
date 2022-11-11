@@ -47,6 +47,7 @@ public class BrokerHousekeepingService implements ChannelEventListener {
 
     @Override
     public void onChannelIdle(String remoteAddr, Channel channel) {
+        // 路由信息
         this.namesrvController.getRouteInfoManager().onChannelDestroy(remoteAddr, channel);
     }
 }

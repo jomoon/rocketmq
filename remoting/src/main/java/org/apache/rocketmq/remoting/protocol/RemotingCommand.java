@@ -231,6 +231,12 @@ public class RemotingCommand {
         this.customHeader = customHeader;
     }
 
+    /**
+     *  解码自定义头命令
+     * @param classHeader
+     * @return
+     * @throws RemotingCommandException
+     */
     public CommandCustomHeader decodeCommandCustomHeader(
         Class<? extends CommandCustomHeader> classHeader) throws RemotingCommandException {
         CommandCustomHeader objectHeader;
@@ -241,7 +247,7 @@ public class RemotingCommand {
         } catch (IllegalAccessException e) {
             return null;
         }
-
+        // 扩展字段解析
         if (this.extFields != null) {
 
             Field[] fields = getClazzFields(classHeader);

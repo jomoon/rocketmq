@@ -49,6 +49,9 @@ public class NamesrvController {
     private final ScheduledExecutorService scheduledExecutorService = Executors.newSingleThreadScheduledExecutor(new ThreadFactoryImpl(
         "NSScheduledThread"));
     private final KVConfigManager kvConfigManager;
+    /**
+     * 路由信息管理器
+     */
     private final RouteInfoManager routeInfoManager;
 
     private RemotingServer remotingServer;

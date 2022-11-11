@@ -204,6 +204,7 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
     public DefaultMQProducer(final String namespace, final String producerGroup, RPCHook rpcHook) {
         this.namespace = namespace;
         this.producerGroup = producerGroup;
+        // 核心处理
         defaultMQProducerImpl = new DefaultMQProducerImpl(this, rpcHook);
     }
 

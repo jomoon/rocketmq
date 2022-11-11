@@ -78,7 +78,8 @@ public class NamesrvStartup {
             System.exit(-1);
             return null;
         }
-
+        // 解析配置文件并填充两个bean
+        // --listenPort 9876
         final NamesrvConfig namesrvConfig = new NamesrvConfig();
         final NettyServerConfig nettyServerConfig = new NettyServerConfig();
         nettyServerConfig.setListenPort(9876);

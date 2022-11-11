@@ -45,25 +45,39 @@ import org.apache.rocketmq.store.PutMessageResult;
 import org.apache.rocketmq.store.PutMessageStatus;
 import org.apache.rocketmq.store.SelectMappedBufferResult;
 import org.apache.rocketmq.store.config.StorePathConfigHelper;
-
+// 通过DefaultMessageStore构造生成 load、start
 public class ScheduleMessageService extends ConfigManager {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
-
+    // 首次延迟时间
     private static final long FIRST_DELAY_TIME = 1000L;
     private static final long DELAY_FOR_A_WHILE = 100L;
+    // 发送异常后延迟该时间后再继续调度
     private static final long DELAY_FOR_A_PERIOD = 10000L;
-
+    // 延迟级别，将延迟级别解析成 delayLevelTable {1:1000,2:5000,3:30000}
     private final ConcurrentMap<Integer /* level */, Long/* delay timeMillis */> delayLevelTable =
         new ConcurrentHashMap<Integer, Long>(32);
-
+    // 延迟级别消息消费进度 每个level的偏移量
     private final ConcurrentMap<Integer /* level */, Long/* offset */> offsetTable =
         new ConcurrentHashMap<Integer, Long>(32);
+    // 默认的消息存储器
     private final DefaultMessageStore defaultMessageStore;
+
     private final AtomicBoolean started = new AtomicBoolean(false);
     private Timer timer;
     private MessageStore writeMessageStore;
+    // 最大延迟级别
     private int maxDelayLevel;
 
+    /**
+     * 1.  构造
+     * 2. load 进度加载和delayTable的数据构造
+     * 3. start
+     *
+     * 设计关键点
+     * 1. 定时消息单独一个主题: SCHEDULE_TOPIC_XXXX => TopicValidator.RMQ_SYS_SCHEDULE_TOPIC
+     * 2.
+     * @param defaultMessageStore
+     */
     public ScheduleMessageService(final DefaultMessageStore defaultMessageStore) {
         this.defaultMessageStore = defaultMessageStore;
         this.writeMessageStore = defaultMessageStore;
@@ -110,34 +124,42 @@ public class ScheduleMessageService extends ConfigManager {
         return storeTimestamp + 1000;
     }
 
+    /**
+     * 创建对应的定时任务，启动定时任务持久化消息队列存储进度
+     */
     public void start() {
         if (started.compareAndSet(false, true)) {
             super.load();
             this.timer = new Timer("ScheduleMessageTimerThread", true);
+            // 根据延迟队列创建定时任务,启动定时任务持久化延迟消息队列进度存储
             for (Map.Entry<Integer, Long> entry : this.delayLevelTable.entrySet()) {
                 Integer level = entry.getKey();
                 Long timeDelay = entry.getValue();
+                // 获取当前消息队列的偏移量，如果不存在那么就使用0
                 Long offset = this.offsetTable.get(level);
                 if (null == offset) {
                     offset = 0L;
                 }
 
                 if (timeDelay != null) {
+                    // 加入到定时任务持久化队列
                     this.timer.schedule(new DeliverDelayedMessageTimerTask(level, offset), FIRST_DELAY_TIME);
                 }
             }
-
+            // 创建延迟队列 每隔10s持久化一次延迟队列的消费进度
             this.timer.scheduleAtFixedRate(new TimerTask() {
 
                 @Override
                 public void run() {
                     try {
                         if (started.get()) {
+                            // 持久化消费进度
                             ScheduleMessageService.this.persist();
                         }
                     } catch (Throwable e) {
                         log.error("scheduleAtFixedRate flush exception", e);
                     }
+                    // 延迟10s，频率 flushDelayOffsetInterval
                 }
             }, 10000, this.defaultMessageStore.getMessageStoreConfig().getFlushDelayOffsetInterval());
         }
@@ -163,9 +185,13 @@ public class ScheduleMessageService extends ConfigManager {
         return this.encode(false);
     }
 
+    // 完成延迟消息消费队列的进度加载和delayLevelTable的数据构造
     public boolean load() {
+        // 进度加载
         boolean result = super.load();
+        // 延迟队列的数据构造
         result = result && this.parseDelayLevel();
+        // 矫正延迟队列偏移量
         result = result && this.correctDelayOffset();
         return result;
     }
@@ -208,6 +234,7 @@ public class ScheduleMessageService extends ConfigManager {
 
     @Override
     public String configFilePath() {
+        // rootDir + File.separator + "config" + File.separator + "delayOffset.json";
         return StorePathConfigHelper.getDelayOffsetStorePath(this.defaultMessageStore.getMessageStoreConfig()
             .getStorePathRootDir());
     }
@@ -250,6 +277,7 @@ public class ScheduleMessageService extends ConfigManager {
                 }
                 long num = Long.parseLong(value.substring(0, value.length() - 1));
                 long delayTimeMillis = tu * num;
+                // 延迟级别数据的构造
                 this.delayLevelTable.put(level, delayTimeMillis);
             }
         } catch (Exception e) {
@@ -274,6 +302,7 @@ public class ScheduleMessageService extends ConfigManager {
         public void run() {
             try {
                 if (isStarted()) {
+                    // 核心
                     this.executeOnTimeup();
                 }
             } catch (Exception e) {
@@ -298,8 +327,9 @@ public class ScheduleMessageService extends ConfigManager {
 
             return result;
         }
-
+        // 核心
         public void executeOnTimeup() {
+            // 根据队列ID与延迟队列主题查找消息消费队列，如果找到，说明目前并不存在该延迟级别的消息，忽略本次任务，根据延时级别创建下次调度任务即可
             ConsumeQueue cq =
                 ScheduleMessageService.this.defaultMessageStore.findConsumeQueue(TopicValidator.RMQ_SYS_SCHEDULE_TOPIC,
                     delayLevel2QueueId(delayLevel));
@@ -307,15 +337,20 @@ public class ScheduleMessageService extends ConfigManager {
             long failScheduleOffset = offset;
 
             if (cq != null) {
+                // 根据偏移量从消息消费队列中获取有效消息
                 SelectMappedBufferResult bufferCQ = cq.getIndexBuffer(this.offset);
                 if (bufferCQ != null) {
                     try {
                         long nextOffset = offset;
                         int i = 0;
                         ConsumeQueueExt.CqExtUnit cqExtUnit = new ConsumeQueueExt.CqExtUnit();
+                        // 遍历ConsumeQueue，默认条目20字节
                         for (; i < bufferCQ.getSize(); i += ConsumeQueue.CQ_STORE_UNIT_SIZE) {
+                            // 偏移量
                             long offsetPy = bufferCQ.getByteBuffer().getLong();
+                            // 消息长度
                             int sizePy = bufferCQ.getByteBuffer().getInt();
+                            // tag hashcode
                             long tagsCode = bufferCQ.getByteBuffer().getLong();
 
                             if (cq.isExtAddr(tagsCode)) {
@@ -338,6 +373,7 @@ public class ScheduleMessageService extends ConfigManager {
                             long countdown = deliverTimestamp - now;
 
                             if (countdown <= 0) {
+                                // 根据偏移量和大小 commitlog 文件中找消息
                                 MessageExt msgExt =
                                     ScheduleMessageService.this.defaultMessageStore.lookMessageByOffset(
                                         offsetPy, sizePy);
@@ -350,6 +386,7 @@ public class ScheduleMessageService extends ConfigManager {
                                                 msgInner.getTopic(), msgInner);
                                             continue;
                                         }
+                                        // 将消息再次存入commitlog到达真正的主题
                                         PutMessageResult putMessageResult =
                                             ScheduleMessageService.this.writeMessageStore
                                                 .putMessage(msgInner);
@@ -388,6 +425,7 @@ public class ScheduleMessageService extends ConfigManager {
                                     }
                                 }
                             } else {
+                                // 根据延迟时间创建下一个定时器
                                 ScheduleMessageService.this.timer.schedule(
                                     new DeliverDelayedMessageTimerTask(this.delayLevel, nextOffset),
                                     countdown);
@@ -428,6 +466,12 @@ public class ScheduleMessageService extends ConfigManager {
                 failScheduleOffset), DELAY_FOR_A_WHILE);
         }
 
+        /**
+         * 根据消息构造 MessageExtBrokerInner
+         *
+         * @param msgExt
+         * @return
+         */
         private MessageExtBrokerInner messageTimeup(MessageExt msgExt) {
             MessageExtBrokerInner msgInner = new MessageExtBrokerInner();
             msgInner.setBody(msgExt.getBody());
@@ -447,8 +491,9 @@ public class ScheduleMessageService extends ConfigManager {
             msgInner.setReconsumeTimes(msgExt.getReconsumeTimes());
 
             msgInner.setWaitStoreMsgOK(false);
+            // 清除消息的延迟级别属性
             MessageAccessor.clearProperty(msgInner, MessageConst.PROPERTY_DELAY_TIME_LEVEL);
-
+            // 恢复原先的消息主题与消息消费队列
             msgInner.setTopic(msgInner.getProperty(MessageConst.PROPERTY_REAL_TOPIC));
 
             String queueIdStr = msgInner.getProperty(MessageConst.PROPERTY_REAL_QUEUE_ID);

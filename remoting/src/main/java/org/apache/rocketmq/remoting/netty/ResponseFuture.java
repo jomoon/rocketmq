@@ -39,6 +39,14 @@ public class ResponseFuture {
     private volatile boolean sendRequestOK = true;
     private volatile Throwable cause;
 
+    /**
+     *
+     * @param channel
+     * @param opaque
+     * @param timeoutMillis
+     * @param invokeCallback
+     * @param once
+     */
     public ResponseFuture(Channel channel, int opaque, long timeoutMillis, InvokeCallback invokeCallback,
         SemaphoreReleaseOnlyOnce once) {
         this.opaque = opaque;
