@@ -45,19 +45,32 @@ public class NamesrvController {
     private final NamesrvConfig namesrvConfig;
 
     private final NettyServerConfig nettyServerConfig;
-
+    /**
+     * 调度线程池，执行定时任务
+     * 检查 broker状态
+     * 打印配置
+      */
     private final ScheduledExecutorService scheduledExecutorService = Executors.newSingleThreadScheduledExecutor(new ThreadFactoryImpl(
         "NSScheduledThread"));
+    /**
+     * kv 配置管理
+     */
     private final KVConfigManager kvConfigManager;
     /**
      * 路由信息管理器
      */
     private final RouteInfoManager routeInfoManager;
-
+    /**
+     * 网络层封装对象
+     */
     private RemotingServer remotingServer;
-
+    /**
+     * ChannelEventListener 监听 channel状态，发生改变时 close idle ... 会向事件队列发起事件
+     */
     private BrokerHousekeepingService brokerHousekeepingService;
-
+    /**
+     * 业务线程池 netty线程主要任务是解析报文 将报文解析成 remotingCommand 将对象交给业务线程池再继续处理
+     */
     private ExecutorService remotingExecutor;
 
     private Configuration configuration;
@@ -77,18 +90,20 @@ public class NamesrvController {
     }
 
     public boolean initialize() {
-
+        // 加载本地kv配置
         this.kvConfigManager.load();
-
+        // 初始化 网络服务器对象
         this.remotingServer = new NettyRemotingServer(this.nettyServerConfig, this.brokerHousekeepingService);
-
+        // 创建业务线程池，默认线程数8
         this.remotingExecutor =
             Executors.newFixedThreadPool(nettyServerConfig.getServerWorkerThreads(), new ThreadFactoryImpl("RemotingExecutorThread_"));
-
+        // 注册处理器
         this.registerProcessor();
 
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
-
+            /**
+             * 扫描broker状态
+             */
             @Override
             public void run() {
                 NamesrvController.this.routeInfoManager.scanNotActiveBroker();
@@ -96,7 +111,9 @@ public class NamesrvController {
         }, 5, 10, TimeUnit.SECONDS);
 
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
-
+            /**
+             * 10min 打印配置
+             */
             @Override
             public void run() {
                 NamesrvController.this.kvConfigManager.printAllPeriodically();
@@ -150,12 +167,13 @@ public class NamesrvController {
             this.remotingServer.registerDefaultProcessor(new ClusterTestRequestProcessor(this, namesrvConfig.getProductEnvName()),
                 this.remotingExecutor);
         } else {
-
+            // 注册缺省的协议处理器
             this.remotingServer.registerDefaultProcessor(new DefaultRequestProcessor(this), this.remotingExecutor);
         }
     }
 
     public void start() throws Exception {
+        // 启动 remotingServer
         this.remotingServer.start();
 
         if (this.fileWatchService != null) {

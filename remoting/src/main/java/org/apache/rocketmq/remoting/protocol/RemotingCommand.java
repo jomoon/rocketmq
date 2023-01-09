@@ -69,17 +69,35 @@ public class RemotingCommand {
         }
     }
 
+    /**
+     * 根据此code对应 Processor处理器
+     */
     private int code;
     private LanguageCode language = LanguageCode.JAVA;
     private int version = 0;
+    /**
+     * 每次生成的RemotingCommand 都会有一个
+     */
     private int opaque = requestId.getAndIncrement();
+    /**
+     * 标记单向还是双向的请求
+     */
     private int flag = 0;
     private String remark;
+    /**
+     *
+     */
     private HashMap<String, String> extFields;
+    /**
+     * 不参与序列化  放入 extFields
+     */
     private transient CommandCustomHeader customHeader;
 
     private SerializeType serializeTypeCurrentRPC = serializeTypeConfigInThisServer;
 
+    /**
+     * 不参与序列化 放入 extFields
+     */
     private transient byte[] body;
 
     protected RemotingCommand() {

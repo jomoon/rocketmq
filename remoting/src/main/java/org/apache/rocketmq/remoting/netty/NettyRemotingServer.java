@@ -65,15 +65,21 @@ import org.apache.rocketmq.remoting.protocol.RemotingCommand;
 
 public class NettyRemotingServer extends NettyRemotingAbstract implements RemotingServer {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(RemotingHelper.ROCKETMQ_REMOTING);
+    // netty 服务端启动对象
     private final ServerBootstrap serverBootstrap;
+    // netty worker线程组
     private final EventLoopGroup eventLoopGroupSelector;
+    // netty boss线程组
     private final EventLoopGroup eventLoopGroupBoss;
+    // 服务端网络配置
     private final NettyServerConfig nettyServerConfig;
-
+    // 公共线程池，注册处理器 不指定线程池，就使用公共的线程池
     private final ExecutorService publicExecutor;
+    // HouseKeepingService BrokerHouseKeepingService namesrv 使用， ClientHouseKeepingService broker使用
     private final ChannelEventListener channelEventListener;
-
+    // 定时器 执行 scanResponseTable
     private final Timer timer = new Timer("ServerHouseKeepingService", true);
+    // channel
     private DefaultEventExecutorGroup defaultEventExecutorGroup;
 
 
@@ -95,6 +101,9 @@ public class NettyRemotingServer extends NettyRemotingAbstract implements Remoti
 
     public NettyRemotingServer(final NettyServerConfig nettyServerConfig,
         final ChannelEventListener channelEventListener) {
+        // 服务端主动向客户端方发起请求 并发限制
+        // 1. 单向请求的并发限制
+        // 2. 异步请求的并发限制
         super(nettyServerConfig.getServerOnewaySemaphoreValue(), nettyServerConfig.getServerAsyncSemaphoreValue());
         this.serverBootstrap = new ServerBootstrap();
         this.nettyServerConfig = nettyServerConfig;
@@ -115,6 +124,7 @@ public class NettyRemotingServer extends NettyRemotingAbstract implements Remoti
         });
 
         if (useEpoll()) {
+            //  支持epoll
             this.eventLoopGroupBoss = new EpollEventLoopGroup(1, new ThreadFactory() {
                 private AtomicInteger threadIndex = new AtomicInteger(0);
 
@@ -192,23 +202,28 @@ public class NettyRemotingServer extends NettyRemotingAbstract implements Remoti
                     return new Thread(r, "NettyServerCodecThread_" + this.threadIndex.incrementAndGet());
                 }
             });
-
+        // 准备共享的处理器
         prepareSharableHandlers();
         // bootstrap启动类
         ServerBootstrap childHandler =
             this.serverBootstrap.group(this.eventLoopGroupBoss, this.eventLoopGroupSelector)
+                    // 设置 serverSocketChannel
                 .channel(useEpoll() ? EpollServerSocketChannel.class : NioServerSocketChannel.class)
                     // 当请求处理线程全满的时候，用于临时存放已完成3次握手的请求队列
                 .option(ChannelOption.SO_BACKLOG, 1024)
                 .option(ChannelOption.SO_REUSEADDR, true)
                 .option(ChannelOption.SO_KEEPALIVE, false)
+                    // 客户端ch选项
                 .childOption(ChannelOption.TCP_NODELAY, true)
                 .childOption(ChannelOption.SO_SNDBUF, nettyServerConfig.getServerSocketSndBufSize())
                 .childOption(ChannelOption.SO_RCVBUF, nettyServerConfig.getServerSocketRcvBufSize())
+                    // 设置服务器端口号
                 .localAddress(new InetSocketAddress(this.nettyServerConfig.getListenPort()))
+                    // 客户端
                 .childHandler(new ChannelInitializer<SocketChannel>() {
                     @Override
                     public void initChannel(SocketChannel ch) throws Exception {
+                        // pipeline逻辑
                         ch.pipeline()
                                 // handshakeHandler
                             .addLast(defaultEventExecutorGroup, HANDSHAKE_HANDLER_NAME, handshakeHandler)
@@ -225,11 +240,14 @@ public class NettyRemotingServer extends NettyRemotingAbstract implements Remoti
                     }
                 });
 
+        // 是否启用线程池
         if (nettyServerConfig.isServerPooledByteBufAllocatorEnable()) {
+            // 客户端开启内存池
             childHandler.childOption(ChannelOption.ALLOCATOR, PooledByteBufAllocator.DEFAULT);
         }
 
         try {
+            // 绑定端口
             ChannelFuture sync = this.serverBootstrap.bind().sync();
             InetSocketAddress addr = (InetSocketAddress) sync.channel().localAddress();
             this.port = addr.getPort();
@@ -238,6 +256,7 @@ public class NettyRemotingServer extends NettyRemotingAbstract implements Remoti
         }
 
         if (this.channelEventListener != null) {
+            // 网络关闭异常事件处理器
             this.nettyEventExecutor.start();
         }
 
@@ -380,9 +399,13 @@ public class NettyRemotingServer extends NettyRemotingAbstract implements Remoti
     }
 
     private void prepareSharableHandlers() {
+        // handshake
         handshakeHandler = new HandshakeHandler(TlsSystemConfig.tlsMode);
+        // encoder
         encoder = new NettyEncoder();
+        // connectionManage
         connectionManageHandler = new NettyConnectManageHandler();
+        //
         serverHandler = new NettyServerHandler();
     }
 
